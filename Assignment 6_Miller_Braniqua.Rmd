@@ -1,0 +1,354 @@
+---
+title: "Assignment Week 6-B.Miller"
+author: "Braniqua Miller"
+date: "2026-02-12"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Homework
+
+Let's return to the brca dataset. Recall that the response variable `y` has values "M" and "B" (denoting malignant and benign). Now, we will use more of the predictors.
+
+```{r}
+
+library(tidyverse)
+library(caret)
+library(dslabs) # for the homework
+library('pROC') #This package has a function for computing the area under the ROC curve.
+
+data(brca)
+brca_data <- data.frame(brca$x) |>
+  data.frame(y = brca$y)
+
+set.seed(42)
+test_index <- createDataPartition(brca_data$y, p = 0.25, list = FALSE)
+test_brca <- brca_data[test_index,]
+train_brca <- brca_data[-test_index,]
+
+summary(train_brca)
+
+SBA_clean <- read_csv("https://raw.githubusercontent.com/gmtanner-cord/DATA318/master/Original%20Data/SBA_clean.csv",
+                      col_types = cols(State = col_factor(),
+            NAICS_2d = col_factor(),
+            ApprovalDate = col_date(),
+            Term = col_double(),
+            RealBacked = col_factor(),
+            NoEmp = col_double(),
+            NewExist = col_factor(),
+            UrbanRural = col_factor(),
+            RevLineCr = col_factor(),
+            LowDoc = col_factor(),
+            DisbursementGross = col_double(),
+            Loan_Status = col_factor(),
+            Portion_Backed = col_double()
+          )) |>
+  select(-Portion_Backed) |>
+  data.frame()
+set.seed(42)
+test_index <- createDataPartition(SBA_clean$Loan_Status, p = 0.20, list = FALSE)
+test_SBA <- SBA_clean[test_index,]
+train_SBA <- SBA_clean[-test_index,]
+```
+
+### Problem 1
+
+Choose 4 predictors. Try to choose a variety of variables. Create plots (at least one for each variable) to look at the relationship between each of the variables and the response variable (`y`). Try density plots (with `fill = y`) and scatter plots (with `color = y`). Write a sentence describing the relationship in each plot you create.
+
+```{r}
+brca_data$y <- factor(brca_data$y)
+
+ggplot(brca_data, aes(x = radius_mean, fill = y)) +
+  geom_density(alpha = 0.5) +
+  annotate("text", x = Inf, y = Inf,label = "The density plot shows tumors with higher radius mean\nvalues have a higher chance of being a malignant class. This\nindicates that a large tumor size correlates with a diagnosis.", hjust = 1, vjust = 1.5, size = 3 )+
+  labs(title = "Radius Mean by Diagnosis Density Plot")
+
+ggplot(brca_data, aes(x = radius_mean, y = texture_mean, color  = y)) +
+  geom_jitter(width = 0, height = 0.1, alpha =0.5) +
+  annotate("text", x = Inf, y = Inf,label = "The scatterplot shows a positive relationship between\nradius and texture mean.Malignant tumors\ngenerally have a higher values for both. ", hjust = 1, vjust = 1.5, size = 2.75 )+
+  labs(title = "Radius Mean by Diagnosis Scatter Plot")
+
+ggplot(brca_data, aes(x = texture_mean, fill = y)) +
+  geom_density(alpha = 0.5) + annotate("text", x = Inf, y = Inf,label = "The density plot shows malignant tumors have a\nslightly higher texture mean values when\ncompared to benign tumors. This shows that\nthere is a moderate relationship with diagnosis(y)", hjust = 1, vjust = 1.3, size = 2.75 )+
+  labs(title = "Texture Mean by Diagnosis Density Plot")
+
+ggplot(brca_data, aes(x = texture_mean, y = perimeter_mean, color = y))   +geom_jitter(width = 0, height = 0.1, alpha =0.5) + 
+  annotate("text", x = Inf, y = Inf,label = "The plot shows that texture and perimeter\nmean increase together.Malignant\ntumors are more conncentrated\nat high values for both variables", hjust = 1, vjust = 1.4, size = 2.75 )+
+  labs(title = "Texture Mean by Diagnosis Scatter Plot")
+
+ggplot(brca_data, aes(x = perimeter_mean, fill = y)) +
+  geom_density(alpha = 0.5) + 
+  annotate("text", x = Inf, y = Inf,label = "The plot shows a shift towards higher perimeter mean values for\nmalignant tumors. This shows a strong correlation to diagnosis", hjust = 1, vjust = 1.4, size = 2.75 )+
+  labs(title = "Perimeter Mean by Diagnosis Density Plot")
+
+ggplot(brca_data, aes(x = perimeter_mean, y = area_mean, color = y)) +
+  geom_jitter(width = 0, height = 0.1, alpha =0.5) + 
+  annotate("text", x = Inf, y = Inf,label = "The plot indicates a strong positive correlation between\nperimeter and area mean with magligant tumors having larger\nperimeters and areas", hjust = 1, vjust = 7, size = 2.75 )+
+  labs(title = "Perimeter Mean by Diagnosis Scatter Plot")
+
+ggplot(brca_data, aes(x = area_mean, fill = y)) +
+  geom_density(alpha = 0.5) + 
+  annotate("text", x = Inf, y = Inf,label = "The plot sows that malignant tumors have a larger area\nmean compared to benign tumors, indicating a strong association", hjust = 1, vjust = 1.4, size = 2.75 )+
+  labs(title = "Area Mean by Diagnosis Density Plot")
+
+ggplot(brca_data, aes(x = area_mean, y = radius_mean, color = y)) +
+  geom_jitter(width = 0, height = 0.1, alpha =0.5) +
+  annotate("text", x = Inf, y = Inf,label = "The plot shows a strong positive correlation\nbetween area and radius mean with malignant tumors\nbeing clustered at higher values of both variables", hjust = 1, vjust = 7, size = 2.75 )+
+  labs(title = "Area Mean by Diagnosis Scatter Plot")
+```
+
+### Problem 2
+
+Create a logistic model to predict the response variable (`y`) using your 4 predictors. Which of the variables are statistically significant? Create an ROC plot for your model. What is the ROC area under curve?
+
+```{r}
+brca_data$y <- factor(brca_data$y)
+
+model1 <- glm(y ~ radius_mean + texture_mean + perimeter_mean + area_mean, data = brca_data, family = binomial)
+
+summary(model1)
+
+#All of the variables choosen are statistically significant.
+
+pred_prob <- predict(model1, type = "response")
+
+roc_obj <-roc(response = brca_data$y, predictor = pred_prob, plot = TRUE)
+
+auc(roc_obj)
+```
+
+### Problem 3
+
+Suppose the clinicians want a model with at least 90% True Positive Rate (Sensitivity). What is the maximum Specificity (or minimum False Positive Rate) that will guarantee 90% TPR? What probability cutoff does this correspond to?
+
+Create a confusion matrix at this cutoff.
+
+```{r}
+prob_brca <- predict(model1, newdata = test_brca, type = "response")
+
+roc_brca <- roc(test_brca$y, prob_brca)
+
+cut90 <- coords(roc_brca,
+                    x = 0.90,
+                    input = "sensitivity",
+                    ret = c("threshold", "specificity", "sensitivity"),
+                    best.method = "closest")
+
+cutoff <- as.numeric(cut90["threshold"])
+spec   <- cut90["specificity"]
+
+cutoff
+spec
+
+cut90
+
+pred_class <- ifelse(prob_brca >= cutoff,
+                     "B",
+                     "M")
+pred_class <- factor(pred_class,
+                     levels = levels(test_brca$y))
+
+confusionMatrix(pred_class, test_brca$y, positive = "M")
+
+
+```
+
+### Problem 4
+
+Interpret the effect of each of your predictor variables on the probability of malignant by comparing 25th and 75th percentile of each variable (while holding all other variables at their median value).
+
+```{r}
+quant_var <-c("radius_mean", "texture_mean", "perimeter_mean", "area_mean")
+
+percentiles <- test_brca %>%
+  summarise(across(all_of(quant_var),
+                   list(P25 = ~quantile(.x, 0.25),
+                        P75 = ~quantile(.x, 0.75),
+                        MED = ~median(.x))))
+percentiles
+
+#Large increases in radius, perimeter and area have a positive effect on malignancy. Variables with smaller changes have weaker effects 
+```
+
+Our baseline model has an ROC area under the curve of 0.7975. We will
+see if we can improve on that. Answer the following questions using the
+training and test set.
+
+### Problem 1 - Near-Zero Variance Predictors
+
+Check for near-zero variance predictors on the training set. Are there
+any?
+
+```{r}
+nzv <- nearZeroVar(train_SBA, saveMetrics = T)
+nzv
+
+#There are no near-zero variance
+```
+
+### Problem 2 - Distribution of Inputs
+
+Visualize the distributions of the quantitative predictors (Term, NoEmp,
+DisbursementGross) with histograms (feel free to create a separate
+histogram for each variable) on the training set. Which variable(s)
+appear to be skewed?
+
+```{r}
+
+ggplot(train_SBA, aes(x = NoEmp)) +
+  geom_histogram(binwidth = 30, fill = "lightgreen", color = "black", alpha = 0.7) +
+  labs(title = "Histogram of Number of Employees", x = "NoEmp", y = "Count")
+
+ggplot(train_SBA, aes(x = Term)) +
+  geom_histogram(binwidth = 30, fill = "lightgreen", color = "black", alpha = 0.7) +
+  labs(title = "Histogram of Number of Employee Terms", x = "Term", y = "Count")
+
+ggplot(train_SBA, aes(x = DisbursementGross)) +
+  geom_histogram(binwidth = 100, fill = "lightgreen", color = "black", alpha = 0.7) +
+  labs(title = "Histogram of Disbursement Gross", x = "DisbursementGross", y = "Count")
+
+```
+
+### Problem 3 - Box-Cox
+
+Compute the $\lambda$ values for all of the quantitative variables from
+problem 2 using the preProcess command on the training set. You might
+have to use the "add one" trick for a few of the variables. What values
+of $\lambda$ did you get?
+
+```{r}
+boxCox <- SBA_clean[, c("Term", "NoEmp", "DisbursementGross")]
+
+boxCox <- boxCox + 1
+
+pre <- preProcess(boxCox, method = "BoxCox")
+
+pre$bc
+```
+
+### Problem 4 - Distribution of variables post-transform
+
+Use predict to execute the transformations. Visualize the quantitative
+variables after transformation on the training set.
+
+```{r}
+tData <- predict(pre,boxCox)
+
+cdata <- tData %>%
+  pivot_longer(
+    cols = everything(), names_to = "Variable", values_to = "Value"
+  )
+
+ggplot(cdata, aes(x = Value)) +
+  geom_histogram(bins = 30, fill = "black", color = "black") +
+  facet_wrap(~Variable, scales = "free") +
+  theme_minimal() +
+  labs(title = "Distributions After Box-Cox Transformation",
+       x = "Transformed Value",
+       y = "Count")
+```
+
+### Problem 5 - Build/Test Model
+
+Use the transformed training data as input to a logistic model.
+
+Transform the test data. Don't forget to transform the test data in the
+same way that you transformed the training data (using the preprocessing
+values from the training set).
+
+Compare the performance (ROC area under the curve) on the transformed
+test set to our baseline (model5).
+
+```{r}
+trainQuant <- train_SBA[, c("Term","NoEmp","DisbursementGross")]
+
+testQuant <- test_SBA[,c("Term","NoEmp","DisbursementGross")]
+
+trainQuant <- trainQuant + 1
+
+testQuant <- testQuant +1
+
+train_t <- predict(pre, trainQuant)
+test_t  <- predict(pre, testQuant)
+
+train_new <- train_SBA
+test_new  <- test_SBA
+
+train_new[, c("Term", "NoEmp", "DisbursementGross")] <- train_t
+test_new[,  c("Term", "NoEmp", "DisbursementGross")] <- test_t
+
+model_base <- glm(Loan_Status ~ .,
+                  data = train_SBA,
+                  family = binomial)
+
+model2 <- glm(Loan_Status ~ .,
+                data = train_new,
+                family = binomial)
+
+prob2 <- predict(model2,
+                   newdata = test_new,
+                   type = "response")
+
+prob_base <- predict(model_base,
+                     newdata = test_SBA,
+                     type = "response")
+
+roc_base <- roc(test_SBA$Loan_Status, prob_base)
+auc_base <- auc(roc_base)
+
+roc_bc <- roc(test_new$Loan_Status, prob2)
+auc_bc <- auc(roc_bc)
+
+auc_bc
+
+auc_bc - auc_base
+
+#The transformation model improved by 0.0048 from 0.7975 to 0.8023
+
+```
+
+### Problem 6 - Nonlinear terms
+
+Experiment with some additional nonlinear terms for some of the
+quantitative variables (DisbursementGross, NoEmp, Term). Do they improve
+the ROC area under the curve?
+
+```{r}
+model3 <- glm(
+ Loan_Status ~ . +
+    I(Term^2),
+  data = train_new,
+  family = binomial
+)
+
+probNl <- predict(model3,
+                   newdata = test_new,
+                   type = "response")
+
+rocNl <- roc(test_new$Loan_Status, probNl)
+aucNl <- auc(rocNl)
+
+aucNl
+
+model4 <- glm(
+ Loan_Status ~ . +
+    I(NoEmp^2),
+  data = train_new,
+  family = binomial
+)
+
+probNl2 <- predict(model4,
+                   newdata = test_new,
+                   type = "response")
+
+rocNl2 <- roc(test_new$Loan_Status, probNl2)
+aucNl2 <- auc(rocNl2)
+
+aucNl2
+
+#There is small consistant improvement.
+
+```
